@@ -1,0 +1,132 @@
+#include <WiFi.h>
+#include <HTTPClient.h>
+#include <Adafruit_Fingerprint.h>
+#include <HardwareSerial.h>
+#include <Wire.h>
+#include <LiquidCrystal_I2C.h>
+
+// -------- WIFI --------
+const char* ssid     = "Avata wifi";
+const char* password = "Avata123";
+
+// -------- GOOGLE SCRIPT --------
+String scriptURL = "https://script.google.com/macros/s/AKfycbwFFvycZLYB58xR7NNk5InJvZ4_9JP0FFRv6L1BhgJlRTLJNKzaDWOB0cHZ0nrTykMT/exec";
+
+// -------- LCD --------
+LiquidCrystal_I2C lcd(0x27, 16, 2);
+
+// -------- FINGERPRINT --------
+HardwareSerial mySerial(2);
+Adafruit_Fingerprint finger = Adafruit_Fingerprint(&mySerial);
+
+// -------- STUDENT DATABASE --------
+String getName(int id) {
+  switch (id) {
+    case 1: return "Mahoro Egide";
+    case 2: return "Mugisha Light";
+    case 3: return "Mugisha Justin";
+    case 4: return "NKUSENGA Justin";
+    default: return "Unknown";
+  }
+}
+
+// -------- DUPLICATE CONTROL --------
+unsigned long lastScanTime = 0;
+int lastID = -1;
+const int delayBetweenScans = 10000; // 10 seconds
+
+// -------- SETUP --------
+void setup() {
+  Serial.begin(115200);
+  mySerial.begin(57600, SERIAL_8N1, 2, 4);
+
+  lcd.init();
+  lcd.backlight();
+
+  lcd.print("Connecting WiFi");
+  WiFi.begin(ssid, password);
+
+  while (WiFi.status() != WL_CONNECTED) {
+    delay(500);
+  }
+
+  lcd.clear();
+  lcd.print("WiFi Connected");
+  delay(2000);
+
+  finger.begin(57600);
+  if (!finger.verifyPassword()) {
+    lcd.clear();
+    lcd.print("Sensor Error");
+    while (1);
+  }
+
+  lcd.clear();
+  lcd.print("Place Finger");
+}
+
+// -------- LOOP --------
+void loop() {
+  int id = getFingerprintID();
+
+  if (id != -1) {
+    // Prevent duplicate scan
+    if (id == lastID && (millis() - lastScanTime < delayBetweenScans)) {
+      lcd.clear();
+      lcd.print("Already Scanned");
+      delay(2000);
+      lcd.clear();
+      lcd.print("Place Finger");
+      return;
+    }
+
+    lastID = id;
+    lastScanTime = millis();
+
+    String name = getName(id);
+
+    lcd.clear();
+    lcd.setCursor(0, 0);
+    lcd.print(name);
+
+    lcd.setCursor(0, 1);
+    lcd.print("Check-In OK");
+
+    sendToSheet(id, name, "IN");
+
+    delay(3000);
+    lcd.clear();
+    lcd.print("Place Finger");
+  }
+}
+
+// -------- FINGERPRINT FUNCTION --------
+int getFingerprintID() {
+  uint8_t p = finger.getImage();
+  if (p != FINGERPRINT_OK) return -1;
+
+  p = finger.image2Tz();
+  if (p != FINGERPRINT_OK) return -1;
+
+  p = finger.fingerSearch();
+  if (p != FINGERPRINT_OK) return -1;
+
+  return finger.fingerID;
+}
+
+// -------- SEND DATA --------
+void sendToSheet(int id, String name, String status) {
+  if (WiFi.status() == WL_CONNECTED) {
+    HTTPClient http;
+
+    String url = scriptURL + "?id=" + String(id) +
+                 "&name=" + name +
+                 "&status=" + status;
+
+    http.begin(url);
+    int httpCode = http.GET();
+
+    Serial.println(httpCode);
+    http.end();
+  }
+}

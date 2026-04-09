@@ -1,0 +1,161 @@
+#include <Adafruit_Fingerprint.h>
+#include <HardwareSerial.h>
+#include <Wire.h>
+#include <LiquidCrystal_I2C.h>
+
+// -------- LCD --------
+LiquidCrystal_I2C lcd(0x27, 16, 2);
+
+// -------- Fingerprint --------
+HardwareSerial mySerial(2);
+Adafruit_Fingerprint finger = Adafruit_Fingerprint(&mySerial);
+
+// -------- Pins --------
+#define RX 2
+#define TX 4
+
+uint8_t id;
+
+void setup()
+{
+    Serial.begin(9600);
+    delay(2000);
+
+    lcd.init();
+    lcd.backlight();
+    lcd.setCursor(0,0);
+    lcd.print("Starting...");
+    delay(2000);
+    lcd.clear();
+
+    mySerial.begin(57600, SERIAL_8N1, RX, TX);
+    finger.begin(57600);
+
+    if (finger.verifyPassword())
+    {
+        Serial.println("Sensor Ready");
+        lcd.print("Sensor Ready");
+    }
+    else
+    {
+        Serial.println("Sensor Not Found");
+        lcd.print("Sensor Error");
+        while (1);
+    }
+
+    delay(2000);
+    lcd.clear();
+}
+
+void loop()
+{
+    // Clear old serial data
+    while (Serial.available()) Serial.read();
+
+    Serial.println("\nEnter ID (1 - 127): ");
+    lcd.setCursor(0,0);
+    lcd.print("Enter ID:    ");
+
+    // Wait for user input
+    while (Serial.available() == 0)
+    {
+        delay(10);
+    }
+
+    // Read ID correctly
+    String input = Serial.readStringUntil('\n');
+    id = input.toInt();
+
+    Serial.print("ID received: ");
+    Serial.println(id);
+    lcd.clear();
+    lcd.setCursor(0, 0);
+    lcd.print("ID received: ");
+    lcd.setCursor(1, 0);
+    lcd.print(id);
+
+    if (id <= 0 || id > 127)
+    {
+        Serial.println("Invalid ID");
+        lcd.clear();
+        lcd.print("Invalid ID");
+        delay(2000);
+        lcd.clear();
+        return;
+    }
+
+    lcd.clear();
+    lcd.print("Enrolling ID:");
+    lcd.setCursor(0,1);
+    lcd.print(id);
+
+    enrollFingerprint();
+
+    delay(3000);
+    lcd.clear();
+}
+
+// -------- ENROLL FUNCTION --------
+void enrollFingerprint()
+{
+    int p = -1;
+
+    // FIRST SCAN
+    lcd.clear();
+    lcd.print("Place Finger");
+    Serial.println("Place finger");
+
+    while (p != FINGERPRINT_OK)
+    {
+        p = finger.getImage();
+    }
+
+    finger.image2Tz(1);
+
+    // FORCE REMOVE
+    lcd.clear();
+    lcd.print("Remove Finger");
+    Serial.println("Remove finger");
+
+    while (finger.getImage() != FINGERPRINT_NOFINGER);
+    delay(1000);
+
+    // SECOND SCAN
+    p = -1;
+    lcd.clear();
+    lcd.print("Place Again");
+    Serial.println("Place same finger again");
+
+    while (p != FINGERPRINT_OK)
+    {
+        p = finger.getImage();
+    }
+
+    finger.image2Tz(2);
+
+    // CREATE + STORE
+    if (finger.createModel() == FINGERPRINT_OK)
+    {
+        if (finger.storeModel(id) == FINGERPRINT_OK)
+        {
+            Serial.println("Stored successfully!");
+            lcd.clear();
+            lcd.print("Success!");
+        }
+        else
+        {
+            Serial.println("Store failed");
+            lcd.clear();
+            lcd.print("Store Failed");
+        }
+    }
+    else
+    {
+        Serial.println("Model creation failed");
+        lcd.clear();
+        lcd.print("Model Error");
+    }
+
+    delay(2000);
+    lcd.clear();
+}
